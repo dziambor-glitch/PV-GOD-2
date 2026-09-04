@@ -1,0 +1,44 @@
+name: APK bauen
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Projekt herunterladen
+        uses: actions/checkout@v4
+
+      - name: Java 17 installieren
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK installieren
+        uses: android-actions/setup-android@v3
+
+      - name: Android Pakete installieren
+        run: yes | sdkmanager "platforms;android-37" "build-tools;36.0.0"
+
+      - name: Gradle installieren
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+
+      - name: Projektordner finden
+        run: |
+          PROJECT_DIR="$(dirname "$(find . -name settings.gradle.kts -print -quit)")"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Android-Projekt gefunden in: $PROJECT_DIR"
+
+      - name: APK bauen
+        run: gradle -p "$PROJECT_DIR" :app:assembleDebug
+
+      - name: APK bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: PVCompact-APK
+          path: "**/app/build/outputs/apk/debug/app-debug.apk"
