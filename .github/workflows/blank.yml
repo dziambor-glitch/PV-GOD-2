@@ -20,42 +20,62 @@ jobs:
       - name: Android SDK einrichten
         uses: android-actions/setup-android@v3
 
-      - name: Projekt entpacken
+      - name: Android-Projekt finden
+        shell: bash
         run: |
           mkdir -p extracted
-          ZIPFILE="$(find . -maxdepth 1 -iname '*.zip' | head -n 1)"
+
+          ZIPFILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
 
           if [ -n "$ZIPFILE" ]; then
             echo "ZIP gefunden: $ZIPFILE"
             unzip -o "$ZIPFILE" -d extracted
+          else
+            echo "Keine ZIP im Hauptordner gefunden – suche direkt im Repository."
           fi
 
-          PROJECT_DIR="$(dirname "$(find . -name settings.gradle.kts -print -quit)")"
+          BUILD_FILE="$(find . -type f -path '*/app/build.gradle.kts' -print -quit)"
 
-          if [ ! -f "$PROJECT_DIR/settings.gradle.kts" ]; then
-            echo "Android-Projekt wurde nicht gefunden."
+          if [ -z "$BUILD_FILE" ]; then
+            echo "FEHLER: app/build.gradle.kts wurde nicht gefunden."
+            echo "Vorhandene Dateien:"
+            find . -maxdepth 4 -type f | sort
             exit 1
           fi
 
-          echo "Projekt gefunden: $PROJECT_DIR"
+          APP_DIR="$(dirname "$BUILD_FILE")"
+          PROJECT_DIR="$(dirname "$APP_DIR")"
+
+          echo "Android-Projekt gefunden: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          # API 37 auf stabile API 36 ändern
-          sed -i 's/compileSdk = 37/compileSdk = 36/' \
-            "$PROJECT_DIR/app/build.gradle.kts"
+          echo "compileSdk wird auf Android 36 gesetzt."
+          sed -E -i 's/compileSdk[[:space:]]*=[[:space:]]*[0-9]+/compileSdk = 36/' "$BUILD_FILE"
 
       - name: Android 36 installieren
+        shell: bash
         run: |
-          yes | sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Gradle 9.6 einrichten
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
 
-      - name: APK bauen
+      - name: Projekt anzeigen
+        shell: bash
         run: |
-          gradle -p "$PROJECT_DIR" :app:assembleDebug
+          echo "Gebaut wird aus: $PROJECT_DIR"
+          echo "Inhalt:"
+          ls -la "$PROJECT_DIR"
+          echo "App:"
+          ls -la "$PROJECT_DIR/app"
+
+      - name: APK bauen
+        shell: bash
+        run: |
+          gradle -p "$PROJECT_DIR" :app:assembleDebug --stacktrace
 
       - name: APK bereitstellen
         uses: actions/upload-artifact@v4
