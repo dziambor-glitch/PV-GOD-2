@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Repository laden
@@ -17,76 +17,70 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK einrichten
-        uses: android-actions/setup-android@v3
-
-      - name: Projekt herunterladen und vorbereiten
+      - name: Projekt entpacken
         shell: bash
         run: |
-          rm -rf /tmp/pvcompact
-          rm -f /tmp/pvcompact.zip
-          mkdir -p /tmp/pvcompact
+          rm -rf extracted
+          mkdir -p extracted
 
-          echo "PVCompact ZIP wird geladen..."
+          ZIPFILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
 
-          curl --fail --location --retry 3 \
-            -o /tmp/pvcompact.zip \
-            "https://raw.githubusercontent.com/dziambor-glitch/PV-GOD/main/PVCompact-AndroidStudio-Forecast-APK-Build%20%281%29.zip"
-
-          echo "ZIP wird entpackt..."
-          unzip -q /tmp/pvcompact.zip -d /tmp/pvcompact
-
-          PROJECT_DIR="/tmp/pvcompact/PVCompact"
-
-          if [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
-            echo "FEHLER: Android-Projekt wurde nicht gefunden."
-            find /tmp/pvcompact -maxdepth 5 -type f | sort
+          if [ -z "$ZIPFILE" ]; then
+            echo "FEHLER: Keine ZIP-Datei gefunden."
             exit 1
           fi
 
-          echo "Projekt gefunden: $PROJECT_DIR"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "ZIP gefunden: $ZIPFILE"
+          unzip -o "$ZIPFILE" -d extracted
 
-          # Android API 36 verwenden
-          sed -E -i \
-            's/compileSdk[[:space:]]*=[[:space:]]*[0-9]+/compileSdk = 36/' \
-            "$PROJECT_DIR/app/build.gradle.kts"
+          BUILD_FILE="$(find extracted -type f -path '*/app/build.gradle.kts' -print -quit)"
 
-          # AGP 9.1.1 verwenden
-          sed -i \
-            's/version "9.4.0"/version "9.1.1"/' \
-            "$PROJECT_DIR/build.gradle.kts"
-
-          # Externes Kotlin-Plugin mit alter DSL erlauben
-          if ! grep -q '^android.newDsl=false' "$PROJECT_DIR/gradle.properties"; then
-            echo 'android.newDsl=false' >> "$PROJECT_DIR/gradle.properties"
+          if [ -z "$BUILD_FILE" ]; then
+            echo "FEHLER: Android-Projekt wurde nicht gefunden."
+            find extracted -maxdepth 5 -type f | sort
+            exit 1
           fi
 
-          echo "Build-Konfiguration:"
-          cat "$PROJECT_DIR/build.gradle.kts"
-          echo
-          cat "$PROJECT_DIR/gradle.properties"
+          APP_DIR="$(dirname "$BUILD_FILE")"
+          PROJECT_DIR="$(dirname "$APP_DIR")"
 
-      - name: Android 36 installieren
+          echo "Android-Projekt gefunden: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "App-Builddatei:"
+          cat "$BUILD_FILE"
+
+          echo "Root-Builddatei:"
+          cat "$PROJECT_DIR/build.gradle.kts"
+
+      - name: Android SDK prüfen
         shell: bash
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "Installierte Android-Plattformen:"
+          ls -la "$ANDROID_HOME/platforms"
 
-      - name: Gradle 9.3.1 einrichten
+          echo "Installierte Build-Tools:"
+          ls -la "$ANDROID_HOME/build-tools"
+
+      - name: Gradle 9.6 einrichten
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.3.1'
+          gradle-version: '9.6.0'
 
       - name: APK bauen
         shell: bash
         run: |
-          echo "Baue Projekt aus: $PROJECT_DIR"
-          gradle -p "$PROJECT_DIR" :app:assembleDebug --no-daemon --stacktrace
+          echo "Baue aus: $PROJECT_DIR"
+          gradle \
+            -p "$PROJECT_DIR" \
+            :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
 
       - name: APK bereitstellen
         uses: actions/upload-artifact@v4
         with:
           name: PVCompact-APK
-          path: /tmp/pvcompact/PVCompact/app/build/outputs/apk/debug/app-debug.apk
+          path: "**/app/build/outputs/apk/debug/app-debug.apk"
           if-no-files-found: error
