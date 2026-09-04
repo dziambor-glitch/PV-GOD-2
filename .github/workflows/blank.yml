@@ -8,37 +8,58 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Projekt herunterladen
+      - name: Dateien laden
         uses: actions/checkout@v4
 
-      - name: Java 17 installieren
+      - name: Java 17 einrichten
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK installieren
+      - name: Android SDK einrichten
         uses: android-actions/setup-android@v3
 
-      - name: Android Pakete installieren
-        run: yes | sdkmanager "platforms;android-37" "build-tools;36.0.0"
+      - name: Projekt entpacken
+        run: |
+          mkdir -p extracted
+          ZIPFILE="$(find . -maxdepth 1 -iname '*.zip' | head -n 1)"
 
-      - name: Gradle installieren
+          if [ -n "$ZIPFILE" ]; then
+            echo "ZIP gefunden: $ZIPFILE"
+            unzip -o "$ZIPFILE" -d extracted
+          fi
+
+          PROJECT_DIR="$(dirname "$(find . -name settings.gradle.kts -print -quit)")"
+
+          if [ ! -f "$PROJECT_DIR/settings.gradle.kts" ]; then
+            echo "Android-Projekt wurde nicht gefunden."
+            exit 1
+          fi
+
+          echo "Projekt gefunden: $PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          # API 37 auf stabile API 36 ändern
+          sed -i 's/compileSdk = 37/compileSdk = 36/' \
+            "$PROJECT_DIR/app/build.gradle.kts"
+
+      - name: Android 36 installieren
+        run: |
+          yes | sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Gradle 9.6 einrichten
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
 
-      - name: Projektordner finden
-        run: |
-          PROJECT_DIR="$(dirname "$(find . -name settings.gradle.kts -print -quit)")"
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Android-Projekt gefunden in: $PROJECT_DIR"
-
       - name: APK bauen
-        run: gradle -p "$PROJECT_DIR" :app:assembleDebug
+        run: |
+          gradle -p "$PROJECT_DIR" :app:assembleDebug
 
       - name: APK bereitstellen
         uses: actions/upload-artifact@v4
         with:
           name: PVCompact-APK
           path: "**/app/build/outputs/apk/debug/app-debug.apk"
+          if-no-files-found: error
